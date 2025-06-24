@@ -1,39 +1,61 @@
-# <h1 align="center"> Forge Template </h1>
+#  Ethereum ↔ Base Token Bridge
 
-**Template repository for getting started quickly with Foundry projects**
+This project implements a **cross-chain token bridge** between the Ethereum and Base blockchains. It allows users to **lock tokens on Ethereum**, and receive **wrapped tokens on Base**, and later **burn them on Base** to **release the original tokens back on Ethereum**.
 
-![Github Actions](https://github.com/foundry-rs/forge-template/workflows/CI/badge.svg)
+---
 
-## Getting Started
+##  Architecture Overview
 
-Click "Use this template" on [GitHub](https://github.com/foundry-rs/forge-template) to create a new repository with this repo as the initial state.
+The bridge uses a **Lock-Mint** / **Burn-Release** architecture with a trusted off-chain **relayer**:
 
-Or, if your repo already exists, run:
-```sh
-forge init
-forge build
-forge test
-```
+-  **Ethereum**: Users lock tokens in a `BridgeETH` contract.
+-  **Relayer**: Listens to deposit/burn events and triggers mint/release.
+-  **Base**: Users receive or burn wrapped tokens via `BridgeBase`.
 
-## Writing your first test
+---
 
-All you need is to `import forge-std/Test.sol` and then inherit it from your test contract. Forge-std's Test contract comes with a pre-instatiated [cheatcodes environment](https://book.getfoundry.sh/cheatcodes/), the `vm`. It also has support for [ds-test](https://book.getfoundry.sh/reference/ds-test.html)-style logs and assertions. Finally, it supports Hardhat's [console.log](https://github.com/brockelmore/forge-std/blob/master/src/console.sol). The logging functionalities require `-vvvv`.
+##  Cross-Chain Workflow
+
+###  Bridging: Ethereum ➝ Base
+
+1. **User deposits tokens on Ethereum**:
+   - Calls `deposit(amount, nonce)`
+   - Tokens are locked in `BridgeETH`
+   - Emits `Deposit` event with `nonce`
+
+2. **Relayer listens to Deposit event**:
+   - Signs and sends tx to Base
+
+3. **Relayer mints wrapped tokens on Base**:
+   - Calls `mint(user, amount, nonce)`
+   - `BridgeBase` mints wrapped tokens
+   - `nonce` is marked to prevent replay
+
+---
+
+###  Bridging Back: Base ➝ Ethereum
+
+1. **User burns wrapped tokens on Base**:
+   - Calls `burn(amount, nonce)`
+   - Emits `Burned` event with `nonce`
+
+2. **Relayer picks up Burn event**:
+   - Sends info to Ethereum
+
+3. **Relayer marks user withdrawable on Ethereum**:
+   - Calls `burnedOnOppositeChain(user, amount, nonce)`
+   - Adds to user’s `pendingBalance`
+
+4. **User withdraws on Ethereum**:
+   - Calls `withdraw(amount)`
+   - Original tokens are released from `BridgeETH`
+
+---
+
+##  Replay Attack Prevention
+
+All cross-chain actions include a `nonce` (unique ID) to prevent replay attacks:
 
 ```solidity
-pragma solidity 0.8.10;
-
-import "forge-std/Test.sol";
-
-contract ContractTest is Test {
-    function testExample() public {
-        vm.roll(100);
-        console.log(1);
-        emit log("hi");
-        assertTrue(true);
-    }
-}
-```
-
-## Development
-
-This project uses [Foundry](https://getfoundry.sh). See the [book](https://book.getfoundry.sh/getting-started/installation.html) for instructions on how to install and use Foundry.
+require(!processedNonces[nonce], "Nonce already used");
+processedNonces[nonce] = true;
